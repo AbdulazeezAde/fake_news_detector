@@ -1,0 +1,8 @@
+streamlit
+scikit-learn
+xgboost
+pandas
+joblib
+transformers
+torch
+datasets
