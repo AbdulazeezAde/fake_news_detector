@@ -1,9 +1,9 @@
 import streamlit as st
-import joblib
+import joblib, requests, re
 from pathlib import Path
+from bs4 import BeautifulSoup
 from transformers import AutoModelForSequenceClassification, AutoTokenizer, pipeline
-import torch
-import re
+from google.genai import types, Client
 
 st.set_page_config(
     page_title="Fake News Detection System",
@@ -11,68 +11,84 @@ st.set_page_config(
     layout="centered"
 )
 
-# Pretrained Fake News BERT Model
-MODEL_NAME = "jy46604790/Fake-News-Bert-Detect"
-model = AutoModelForSequenceClassification.from_pretrained(MODEL_NAME)
-tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
-clf = pipeline("text-classification", model=model, tokenizer=tokenizer)
 
+xgb_pipe = joblib.load('model/baseline_xgb.pkl')
+bert_clf = pipeline(
+    "text-classification",
+    model=AutoModelForSequenceClassification.from_pretrained("jy46604790/Fake-News-Bert-Detect"),
+    tokenizer=AutoTokenizer.from_pretrained("jy46604790/Fake-News-Bert-Detect"),
+)
 
-@st.cache_data
-def clean_text(text: str) -> str:
+# GenAI client
+genai = Client()
+retrieval_tool = types.Tool(
+    google_search_retrieval=types.GoogleSearchRetrieval(
+        dynamic_retrieval_config=types.DynamicRetrievalConfig(
+            mode=types.DynamicRetrievalConfigMode.MODE_DYNAMIC,
+            dynamic_threshold=0.7
+        )
+    )
+)
+gen_cfg = types.GenerateContentConfig(tools=[retrieval_tool])
+
+def clean_text(text):
     text = text.lower()
     text = re.sub(r'<[^>]+>', ' ', text)
     text = re.sub(r'http\S+|www\.\S+', ' ', text)
     text = re.sub(r'[^a-z0-9\s]', ' ', text)
-    text = re.sub(r'\s+', ' ', text).strip()
-    return text
+    return re.sub(r'\s+', ' ', text).strip()
 
+def detect_probs(text):
+    p_xgb_real, p_xgb_fake = xgb_pipe.predict_proba([text])[0][1], xgb_pipe.predict_proba([text])[0][0]
+    res = bert_clf(text)[0]
+    p_bert_real = res['score'] if res['label']=='LABEL_1' else (1-res['score'])
+    p_bert_fake = 1 - p_bert_real
+    # simple average of detector models
+    p_det_real = 0.5*p_xgb_real + 0.5*p_bert_real
+    p_det_fake = 1 - p_det_real
+    return p_det_real, p_det_fake
 
-@st.cache_data
-def predict_xgb(text: str, pipeline):
-    # Returns (real_prob, fake_prob)
-    if pipeline is None:
-        return None, None
-    proba = pipeline.predict_proba([text])[0]
-    return float(proba[1]), float(proba[0])
+def genai_probs(query):
+    resp = genai.models.generate_content(
+        model='gemini-1.5-flash',
+        contents=f"Is this claim real or fake? \"{query}\"",
+        config=gen_cfg
+    )
+    text = resp.text.lower()
+    # rudimentary parse: look for phrases “real” vs “fake” and confidences
+    # you can refine with a better prompt that returns JSON
+    if "real" in text and "fake" in text:
+        # e.g. “I’m 80% sure it’s fake”
+        import re
+        m = re.search(r'(\d+)%', text)
+        if m:
+            p_fake = int(m.group(1))/100
+            p_real = 1 - p_fake
+            return p_real, p_fake
+    # fallback
+    return 0.5, 0.5
 
-
-@st.cache_data
-def predict_bert(text: str):
-    
-    result = clf(text)[0]
-    label = result['label']
-    score = result['score']
-    
-    if label == 'LABEL_1':
-        return score, 1 - score
-    else:
-        return 1 - score, score
-
+def combine(p_det, p_gen, w_det=0.7):
+    p_real = w_det*p_det[0] + (1-w_det)*p_gen[0]
+    p_fake = 1 - p_real
+    return p_real, p_fake
 
 
 st.title("📰 Fake News Detector")
 st.markdown("### AI-Powered News Verification Tool")
 st.markdown("This application uses a Fine-tuned BERT model to classify news articles as real or fake.")
-input_type = st.radio("Select input type:", ['Text',  'File'])
 
-content = ''
-if input_type == 'Text':
-    content = st.text_area("Enter headline or article text:")
-elif input_type == 'File':
-    uploaded = st.file_uploader("Upload a text file (.txt)", type=['txt'])
-    if uploaded is not None:
-        content = uploaded.read().decode('utf-8', errors='ignore')
-
+inp = st.text_area("Paste headline or text:")
 if st.button("Predict"):
-    if not content or not content.strip():
-        st.warning("Please provide valid content to classify.")
-    else:
-        cleaned = clean_text(content)
-
-        # Fake News BERT Model
-        bert_real, bert_fake = predict_bert(cleaned)
-        label_bert = "Real" if bert_real >= 0.5 else "Fake"
-        st.subheader("Fake News Bert Model")
-        st.write(f"Prediction: **{label_bert}**")
-        st.write(f"Confidence: Real = {bert_real:.2f}, Fake = {bert_fake:.2f}")
+    txt = clean_text(inp)
+    # 1. Detector
+    p_det_real, p_det_fake = detect_probs(txt)
+    st.write("**Detector model** — Real:", f"{p_det_real:.2f}", "Fake:", f"{p_det_fake:.2f}")
+    # 2. Generative
+    p_gen_real, p_gen_fake = genai_probs(txt)
+    st.write("**Generative AI** — Real:", f"{p_gen_real:.2f}", "Fake:", f"{p_gen_fake:.2f}")
+    # 3. Combined
+    p_comb_real, p_comb_fake = combine((p_det_real, p_det_fake), (p_gen_real, p_gen_fake))
+    label = "Real News" if p_comb_real>=0.5 else "Fake News"
+    st.write("## 🔗 Combined — Prediction:", label)
+    st.write(f"Combined Confidence — Real: {p_comb_real:.2f}, Fake: {p_comb_fake:.2f}")
