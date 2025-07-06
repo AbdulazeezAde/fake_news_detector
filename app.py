@@ -1,7 +1,6 @@
 import streamlit as st
-import joblib, requests, re
+import joblib, re
 from pathlib import Path
-from bs4 import BeautifulSoup
 from transformers import AutoModelForSequenceClassification, AutoTokenizer, pipeline
 from google.genai import types, Client
 
@@ -55,10 +54,9 @@ def genai_probs(query):
         config=gen_cfg
     )
     text = resp.text.lower()
-    # rudimentary parse: look for phrases “real” vs “fake” and confidences
-    # you can refine with a better prompt that returns JSON
+    
     if "real" in text and "fake" in text:
-        # e.g. “I’m 80% sure it’s fake”
+        
         import re
         m = re.search(r'(\d+)%', text)
         if m:
