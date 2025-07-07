@@ -8,20 +8,27 @@ import numpy as np
 from typing import Tuple, Dict, Optional
 import json
 from datetime import datetime
+from dotenv import load_dotenv
+import os
 
 # Google Generative AI imports
 from google import genai
 from google.genai import types
 
+load_dotenv()
+
 st.set_page_config(
-    page_title="Enhanced Fake News Detection System",
+    page_title="Fake News Detection System",
     page_icon="📰",
     layout="centered"
 )
 
+# Get API key from sidebar
+GEMINI_API_KEY = st.sidebar.text_input("🔑 Enter your Gemini API Key", type="password")
+
 # Configuration
 MODEL_NAME = "jy46604790/Fake-News-Bert-Detect"
-GEMINI_API_KEY = "AIzaSyB0D21uj-P2PtMQa__UMG2UD4tbi4agngI"  # Replace with your actual API key
+os.getenv('GEMINI_API_KEY')
 
 # Initialize models
 @st.cache_resource
@@ -37,7 +44,7 @@ def init_gemini_client():
     """Initialize Gemini client"""
     if not GEMINI_API_KEY:
         return None
-    
+
     client = genai.Client(api_key=GEMINI_API_KEY)
     grounding_tool = types.Tool(google_search=types.GoogleSearch())
     config = types.GenerateContentConfig(tools=[grounding_tool])
@@ -60,7 +67,7 @@ def predict_bert(text: str, _clf) -> Tuple[float, float]:
     result = _clf(text)[0]
     label = result['label']
     score = result['score']
-    
+
     if label == 'LABEL_1':
         return score, 1 - score  # real_prob, fake_prob
     else:
@@ -72,7 +79,7 @@ def extract_key_claims(text: str) -> list:
     # Simple claim extraction - you can enhance this with NLP techniques
     sentences = text.split('.')
     claims = []
-    
+
     # Look for sentences with specific patterns that indicate factual claims
     claim_patterns = [
         r'\b(said|stated|announced|reported|confirmed|revealed)\b',
@@ -80,7 +87,7 @@ def extract_key_claims(text: str) -> list:
         r'\b(\d+%|\d+\s+(people|percent|million|billion|thousand))\b',
         r'\b(happened|occurred|took place|will|was|were)\b'
     ]
-    
+
     for sentence in sentences:
         sentence = sentence.strip()
         if len(sentence) > 20:  # Avoid very short sentences
@@ -88,51 +95,51 @@ def extract_key_claims(text: str) -> list:
                 if re.search(pattern, sentence.lower()):
                     claims.append(sentence)
                     break
-    
+
     return claims[:3]  # Return top 3 claims to avoid API limits
 
 def fact_check_with_ai(text: str, claims: list, client, config) -> Dict:
     """Fact-check claims using Gemini AI"""
     if not client or not claims:
         return {"available": False, "results": []}
-    
+
     try:
         fact_check_results = []
-        
+
         for claim in claims:
             # Create a fact-checking prompt
             prompt = f"""
             Please fact-check this claim and provide a credibility assessment:
-            
+
             Claim: "{claim}"
-            
+
             Please provide:
             1. Verification status (True/False/Partially True/Unverified)
             2. Supporting evidence or sources
             3. Credibility score (0-1 where 1 is most credible)
             4. Brief explanation
-            
+
             Format your response as a structured analysis.
             """
-            
+
             response = client.models.generate_content(
                 model="gemini-2.0-flash-exp",
                 contents=prompt,
                 config=config,
             )
-            
+
             # Parse the response to extract credibility score
             response_text = response.text
             credibility_score = extract_credibility_score(response_text)
-            
+
             fact_check_results.append({
                 "claim": claim,
                 "response": response_text,
                 "credibility_score": credibility_score
             })
-        
+
         return {"available": True, "results": fact_check_results}
-    
+
     except Exception as e:
         st.error(f"Error in fact-checking: {str(e)}")
         return {"available": False, "results": []}
@@ -145,7 +152,7 @@ def extract_credibility_score(response_text: str) -> float:
         r'credibility[:\s]*(\d*\.?\d+)',
         r'score[:\s]*(\d*\.?\d+)'
     ]
-    
+
     for pattern in patterns:
         match = re.search(pattern, response_text.lower())
         if match:
@@ -154,7 +161,7 @@ def extract_credibility_score(response_text: str) -> float:
                 return min(1.0, max(0.0, score))  # Ensure score is between 0 and 1
             except ValueError:
                 continue
-    
+
     # If no explicit score found, try to infer from keywords
     response_lower = response_text.lower()
     if any(word in response_lower for word in ['true', 'verified', 'accurate', 'correct']):
@@ -171,11 +178,11 @@ def calculate_combined_score(bert_real: float, bert_fake: float,
                            bert_weight: float = 0.6, 
                            ai_weight: float = 0.4) -> Dict:
     """Calculate combined confidence score"""
-    
+
     # BERT component
     bert_confidence = max(bert_real, bert_fake)
     bert_prediction = "Real" if bert_real > bert_fake else "Fake"
-    
+
     # AI fact-checking component
     if fact_check_results["available"] and fact_check_results["results"]:
         ai_scores = [result["credibility_score"] for result in fact_check_results["results"]]
@@ -186,7 +193,7 @@ def calculate_combined_score(bert_real: float, bert_fake: float,
         avg_credibility = 0.5
         ai_confidence = 0.0
         ai_prediction = "Unknown"
-    
+
     # Combined score calculation
     if fact_check_results["available"]:
         # Weighted combination
@@ -206,9 +213,9 @@ def calculate_combined_score(bert_real: float, bert_fake: float,
         # Only BERT available
         combined_confidence = bert_confidence * 0.8  # Reduce confidence when only one model
         combined_prediction = bert_prediction
-    
+
     combined_confidence = min(1.0, combined_confidence)  # Cap at 1.0
-    
+
     return {
         "prediction": combined_prediction,
         "confidence": combined_confidence,
@@ -254,7 +261,7 @@ with st.expander("Advanced Options"):
     bert_weight = st.slider("BERT Model Weight", 0.1, 0.9, 0.6, 0.1)
     ai_weight = 1.0 - bert_weight
     st.write(f"AI Fact-check Weight: {ai_weight}")
-    
+
     enable_detailed_analysis = st.checkbox("Enable detailed claim analysis", value=True)
 
 if st.button("Analyze News", type="primary"):
@@ -264,45 +271,45 @@ if st.button("Analyze News", type="primary"):
         with st.spinner("Analyzing content..."):
             # Clean text
             cleaned = clean_text(content)
-            
+
             # BERT prediction
             bert_real, bert_fake = predict_bert(cleaned, clf)
-            
+
             # Extract claims for fact-checking
             claims = extract_key_claims(content)
-            
+
             # Fact-check with AI
             fact_check_results = fact_check_with_ai(content, claims, gemini_client, gemini_config)
-            
+
             # Calculate combined score
             combined_results = calculate_combined_score(
                 bert_real, bert_fake, fact_check_results, bert_weight, ai_weight
             )
-        
+
         # Display results
         st.header("📊 Analysis Results")
-        
+
         # Main prediction
         prediction = combined_results["prediction"]
         confidence = combined_results["confidence"]
-        
+
         if prediction == "Real":
             st.success(f"🟢 **Prediction: {prediction}**")
         else:
             st.error(f"🔴 **Prediction: {prediction}**")
-        
+
         st.metric("Overall Confidence", f"{confidence:.1%}")
-        
+
         # Detailed breakdown
         col1, col2 = st.columns(2)
-        
+
         with col1:
             st.subheader("🤖 BERT Model Analysis")
             st.write(f"**Prediction:** {combined_results['bert_prediction']}")
             st.write(f"**Confidence:** {combined_results['bert_confidence']:.1%}")
             st.write(f"**Real Probability:** {bert_real:.3f}")
             st.write(f"**Fake Probability:** {bert_fake:.3f}")
-        
+
         with col2:
             st.subheader("🔍 AI Fact-Check Analysis")
             if fact_check_results["available"]:
@@ -313,17 +320,17 @@ if st.button("Analyze News", type="primary"):
             else:
                 st.write("**Status:** Not available")
                 st.write("*Configure Gemini API key for fact-checking*")
-        
+
         # Detailed claim analysis
         if enable_detailed_analysis and fact_check_results["available"]:
             st.subheader("Detailed Claim Analysis")
-            
+
             for i, result in enumerate(fact_check_results["results"], 1):
                 with st.expander(f"Claim {i}: {result['claim'][:100]}..."):
                     st.write(f"**Credibility Score:** {result['credibility_score']:.3f}")
                     st.write("**AI Analysis:**")
                     st.write(result['response'])
-        
+
         # Recommendations
         st.subheader("Recommendations")
         if confidence > 0.8:
@@ -335,7 +342,7 @@ if st.button("Analyze News", type="primary"):
             st.info("🔍 Moderate confidence. Consider additional verification.")
         else:
             st.warning("Low confidence. Manual fact-checking recommended.")
-        
+
         # Export results
         if st.button("📥 Export Analysis"):
             results_data = {
@@ -346,7 +353,7 @@ if st.button("Analyze News", type="primary"):
                 "fact_check_available": fact_check_results["available"],
                 "claims_analyzed": len(fact_check_results["results"]) if fact_check_results["available"] else 0
             }
-            
+
             st.download_button(
                 label="Download Analysis Report",
                 data=json.dumps(results_data, indent=2),
