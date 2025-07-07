@@ -8,3 +8,4 @@ torch
 datasets
 google-generativeai
 google-genai
+python-dotenv
