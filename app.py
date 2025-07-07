@@ -2,7 +2,7 @@ import streamlit as st
 import joblib, re
 from pathlib import Path
 from transformers import AutoModelForSequenceClassification, AutoTokenizer, pipeline
-from google.generativeai import types, Client
+from google.genai import types
 
 
 
@@ -21,7 +21,7 @@ bert_clf = pipeline(
 )
 
 # GenAI client
-genai = Client()
+genai = genai.Client()
 retrieval_tool = types.Tool(
     google_search_retrieval=types.GoogleSearchRetrieval(
         dynamic_retrieval_config=types.DynamicRetrievalConfig(
