@@ -53,7 +53,7 @@ def detect_probs(text):
     p_bert_real = res['score'] if res['label']=='LABEL_1' else (1-res['score'])
     p_bert_fake = 1 - p_bert_real
     # simple average of detector models
-    p_det_real = 0.5*p_xgb_real + 0.5*p_bert_real
+    p_det_real = 0.4*p_xgb_real + 0.6*p_bert_real
     p_det_fake = 1 - p_det_real
     return p_det_real, p_det_fake
 
