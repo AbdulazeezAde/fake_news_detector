@@ -13,12 +13,12 @@ st.set_page_config(
     layout="centered"
 )
 
-# Get API Key from user input
-api_key = st.sidebar.text_input("🔑 Enter your Google GenAI API Key", type="password")
-if api_key:
-    genai.configure(api_key=api_key)
-else:
-    st.warning("Please enter your GenAI API Key in the sidebar to enable generative verification.")
+# # Get API Key from user input
+# api_key = st.sidebar.text_input("🔑 Enter your Google GenAI API Key", type="password")
+# if api_key:
+#     genai.configure(api_key=api_key)
+# else:
+#     st.warning("Please enter your GenAI API Key in the sidebar to enable generative verification.")
 
 
 xgb_pipe = joblib.load('model/baseline_xgb.pkl')
