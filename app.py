@@ -5,15 +5,11 @@ from transformers import AutoModelForSequenceClassification, AutoTokenizer, pipe
 import torch
 import re
 import numpy as np
-from typing import Tuple, Dict, Optional
+from typing import Tuple
 import json
 from datetime import datetime
 from dotenv import load_dotenv
 import os
-
-# Google Generative AI imports
-from google import genai
-from google.genai import types
 
 load_dotenv()
 
@@ -23,12 +19,8 @@ st.set_page_config(
     layout="centered"
 )
 
-# Get API key from sidebar
-GEMINI_API_KEY = st.sidebar.text_input("🔑 Enter your Gemini API Key", type="password")
-GEMINI_API_KEY = "AIzaSyB0D21uj-P2PtMQa__UMG2UD4tbi4agngI"
 # Configuration
 MODEL_NAME = "jy46604790/Fake-News-Bert-Detect"
-os.getenv('GEMINI_API_KEY')
 
 # Initialize models
 @st.cache_resource
@@ -38,17 +30,6 @@ def load_models():
     tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
     clf = pipeline("text-classification", model=model, tokenizer=tokenizer)
     return model, tokenizer, clf
-
-@st.cache_resource
-def init_gemini_client():
-    """Initialize Gemini client"""
-    if not GEMINI_API_KEY:
-        return None
-
-    client = genai.Client(api_key=GEMINI_API_KEY)
-    grounding_tool = types.Tool(google_search=types.GoogleSearch())
-    config = types.GenerateContentConfig(tools=[grounding_tool])
-    return client, config
 
 # Text processing functions
 @st.cache_data
@@ -73,177 +54,41 @@ def predict_bert(text: str, _clf) -> Tuple[float, float]:
     else:
         return 1 - score, score
 
-@st.cache_data
-def extract_key_claims(text: str) -> list:
-    """Extract key factual claims from text"""
-    # Simple claim extraction - you can enhance this with NLP techniques
-    sentences = text.split('.')
-    claims = []
-
-    # Look for sentences with specific patterns that indicate factual claims
-    claim_patterns = [
-        r'\b(said|stated|announced|reported|confirmed|revealed)\b',
-        r'\b(according to|sources|officials|study|research)\b',
-        r'\b(\d+%|\d+\s+(people|percent|million|billion|thousand))\b',
-        r'\b(happened|occurred|took place|will|was|were)\b'
-    ]
-
-    for sentence in sentences:
-        sentence = sentence.strip()
-        if len(sentence) > 20:  # Avoid very short sentences
-            for pattern in claim_patterns:
-                if re.search(pattern, sentence.lower()):
-                    claims.append(sentence)
-                    break
-
-    return claims[:3]  # Return top 3 claims to avoid API limits
-
-def fact_check_with_ai(text: str, claims: list, client, config) -> Dict:
-    """Fact-check claims using Gemini AI"""
-    if not client or not claims:
-        return {"available": False, "results": []}
-
-    try:
-        fact_check_results = []
-
-        for claim in claims:
-            # Create a fact-checking prompt
-            prompt = f"""
-            Please fact-check this claim and provide a credibility assessment:
-
-            Claim: "{claim}"
-
-            Please provide:
-            1. Verification status (True/False/Partially True/Unverified)
-            2. Supporting evidence or sources
-            3. Credibility score (0-1 where 1 is most credible)
-            4. Brief explanation
-
-            Format your response as a structured analysis.
-            """
-
-            response = client.models.generate_content(
-                model="gemini-2.0-flash-exp",
-                contents=prompt,
-                config=config,
-            )
-
-            # Parse the response to extract credibility score
-            response_text = response.text
-            credibility_score = extract_credibility_score(response_text)
-
-            fact_check_results.append({
-                "claim": claim,
-                "response": response_text,
-                "credibility_score": credibility_score
-            })
-
-        return {"available": True, "results": fact_check_results}
-
-    except Exception as e:
-        st.error(f"Error in fact-checking: {str(e)}")
-        return {"available": False, "results": []}
-
-def extract_credibility_score(response_text: str) -> float:
-    """Extract credibility score from AI response"""
-    # Look for patterns like "credibility score: 0.8" or "credibility: 0.8"
-    patterns = [
-        r'credibility\s*score[:\s]*(\d*\.?\d+)',
-        r'credibility[:\s]*(\d*\.?\d+)',
-        r'score[:\s]*(\d*\.?\d+)'
-    ]
-
-    for pattern in patterns:
-        match = re.search(pattern, response_text.lower())
-        if match:
-            try:
-                score = float(match.group(1))
-                return min(1.0, max(0.0, score))  # Ensure score is between 0 and 1
-            except ValueError:
-                continue
-
-    # If no explicit score found, try to infer from keywords
-    response_lower = response_text.lower()
-    if any(word in response_lower for word in ['true', 'verified', 'accurate', 'correct']):
-        return 0.8
-    elif any(word in response_lower for word in ['false', 'incorrect', 'misleading', 'fake']):
-        return 0.2
-    elif any(word in response_lower for word in ['partially', 'mixed', 'unclear']):
-        return 0.5
+def get_prediction_category(real_prob: float, fake_prob: float) -> str:
+    """Get prediction category based on probabilities"""
+    confidence = max(real_prob, fake_prob)
+    
+    if confidence > 0.8:
+        return "High Confidence"
+    elif confidence > 0.6:
+        return "Moderate Confidence"
     else:
-        return 0.5  # Default neutral score
+        return "Low Confidence"
 
-def calculate_combined_score(bert_real: float, bert_fake: float, 
-                           fact_check_results: Dict, 
-                           bert_weight: float = 0.6, 
-                           ai_weight: float = 0.4) -> Dict:
-    """Calculate combined confidence score"""
-
-    # BERT component
-    bert_confidence = max(bert_real, bert_fake)
-    bert_prediction = "Real" if bert_real > bert_fake else "Fake"
-
-    # AI fact-checking component
-    if fact_check_results["available"] and fact_check_results["results"]:
-        ai_scores = [result["credibility_score"] for result in fact_check_results["results"]]
-        avg_credibility = np.mean(ai_scores)
-        ai_confidence = abs(avg_credibility - 0.5) * 2  # Convert to confidence measure
-        ai_prediction = "Real" if avg_credibility > 0.5 else "Fake"
-    else:
-        avg_credibility = 0.5
-        ai_confidence = 0.0
-        ai_prediction = "Unknown"
-
-    # Combined score calculation
-    if fact_check_results["available"]:
-        # Weighted combination
-        if bert_prediction == ai_prediction:
-            # Both models agree - boost confidence
-            combined_confidence = (bert_weight * bert_confidence + ai_weight * ai_confidence) * 1.2
-            combined_prediction = bert_prediction
+def get_recommendation(prediction: str, confidence: float) -> str:
+    """Get recommendation based on prediction and confidence"""
+    if confidence > 0.8:
+        if prediction == "Real":
+            return "✅ High confidence in authenticity. Content appears credible."
         else:
-            # Models disagree - reduce confidence
-            combined_confidence = (bert_weight * bert_confidence + ai_weight * ai_confidence) * 0.8
-            # Choose based on higher individual confidence
-            if bert_confidence > ai_confidence:
-                combined_prediction = bert_prediction
-            else:
-                combined_prediction = ai_prediction
+            return "⚠️ High confidence this is fake news. Exercise caution."
+    elif confidence > 0.6:
+        return "🔍 Moderate confidence. Consider additional verification from multiple sources."
     else:
-        # Only BERT available
-        combined_confidence = bert_confidence * 0.8  # Reduce confidence when only one model
-        combined_prediction = bert_prediction
-
-    combined_confidence = min(1.0, combined_confidence)  # Cap at 1.0
-
-    return {
-        "prediction": combined_prediction,
-        "confidence": combined_confidence,
-        "bert_prediction": bert_prediction,
-        "bert_confidence": bert_confidence,
-        "ai_prediction": ai_prediction,
-        "ai_confidence": ai_confidence,
-        "ai_credibility": avg_credibility
-    }
+        return "❓ Low confidence. Manual fact-checking strongly recommended."
 
 # Streamlit UI
-st.title("📰 Enhanced Fake News Detector")
-st.markdown("### AI-Powered News Verification Tool with Fact-Checking")
-st.markdown("This application combines BERT classification with AI-powered fact-checking for improved accuracy.")
+st.title("📰 Fake News Detection System")
+st.markdown("### BERT-Powered News Verification Tool")
+st.markdown("This application uses a fine-tuned BERT model to classify news articles as real or fake.")
 
 # Load models
 try:
     model, tokenizer, clf = load_models()
+    st.success("✅ BERT model loaded successfully")
 except Exception as e:
     st.error(f"❌ Error loading BERT model: {str(e)}")
     st.stop()
-
-# Initialize Gemini client
-gemini_client, gemini_config = init_gemini_client()
-if gemini_client:
-    st.success("Gemini AI fact-checker enabled")
-else:
-    st.warning("⚠️ Gemini AI not configured - add API key for enhanced fact-checking")
 
 # User input
 input_type = st.radio("Select input type:", ['Text', 'File'])
@@ -258,11 +103,8 @@ elif input_type == 'File':
 
 # Advanced options
 with st.expander("Advanced Options"):
-    bert_weight = st.slider("BERT Model Weight", 0.1, 0.9, 0.6, 0.1)
-    ai_weight = 1.0 - bert_weight
-    st.write(f"AI Fact-check Weight: {ai_weight}")
-
-    enable_detailed_analysis = st.checkbox("Enable detailed claim analysis", value=True)
+    show_raw_scores = st.checkbox("Show raw prediction scores", value=False)
+    show_cleaned_text = st.checkbox("Show cleaned text", value=False)
 
 if st.button("Analyze News", type="primary"):
     if not content or not content.strip():
@@ -273,85 +115,86 @@ if st.button("Analyze News", type="primary"):
             cleaned = clean_text(content)
 
             # BERT prediction
-            bert_real, bert_fake = predict_bert(cleaned, clf)
-
-            # Extract claims for fact-checking
-            claims = extract_key_claims(content)
-
-            # Fact-check with AI
-            fact_check_results = fact_check_with_ai(content, claims, gemini_client, gemini_config)
-
-            # Calculate combined score
-            combined_results = calculate_combined_score(
-                bert_real, bert_fake, fact_check_results, bert_weight, ai_weight
-            )
+            real_prob, fake_prob = predict_bert(cleaned, clf)
+            
+            # Determine prediction
+            prediction = "Real" if real_prob > fake_prob else "Fake"
+            confidence = max(real_prob, fake_prob)
+            confidence_category = get_prediction_category(real_prob, fake_prob)
 
         # Display results
         st.header("📊 Analysis Results")
 
         # Main prediction
-        prediction = combined_results["prediction"]
-        confidence = combined_results["confidence"]
-
         if prediction == "Real":
             st.success(f"🟢 **Prediction: {prediction}**")
         else:
             st.error(f"🔴 **Prediction: {prediction}**")
 
-        st.metric("Overall Confidence", f"{confidence:.1%}")
+        # Confidence metrics
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.metric("Confidence", f"{confidence:.1%}")
+        
+        with col2:
+            st.metric("Confidence Level", confidence_category)
 
         # Detailed breakdown
-        col1, col2 = st.columns(2)
+        st.subheader("🤖 BERT Model Analysis")
+        
+        # Probability bars
+        st.write("**Probability Breakdown:**")
+        st.progress(real_prob, text=f"Real: {real_prob:.1%}")
+        st.progress(fake_prob, text=f"Fake: {fake_prob:.1%}")
 
-        with col1:
-            st.subheader("🤖 BERT Model Analysis")
-            st.write(f"**Prediction:** {combined_results['bert_prediction']}")
-            st.write(f"**Confidence:** {combined_results['bert_confidence']:.1%}")
-            st.write(f"**Real Probability:** {bert_real:.3f}")
-            st.write(f"**Fake Probability:** {bert_fake:.3f}")
+        # Raw scores if requested
+        if show_raw_scores:
+            st.subheader("📈 Raw Prediction Scores")
+            st.write(f"**Real Probability:** {real_prob:.6f}")
+            st.write(f"**Fake Probability:** {fake_prob:.6f}")
+            st.write(f"**Confidence Score:** {confidence:.6f}")
 
-        with col2:
-            st.subheader("🔍 AI Fact-Check Analysis")
-            if fact_check_results["available"]:
-                st.write(f"**Prediction:** {combined_results['ai_prediction']}")
-                st.write(f"**Confidence:** {combined_results['ai_confidence']:.1%}")
-                st.write(f"**Avg Credibility:** {combined_results['ai_credibility']:.3f}")
-                st.write(f"**Claims Analyzed:** {len(fact_check_results['results'])}")
-            else:
-                st.write("**Status:** Not available")
-                st.write("*Configure Gemini API key for fact-checking*")
-
-        # Detailed claim analysis
-        if enable_detailed_analysis and fact_check_results["available"]:
-            st.subheader("Detailed Claim Analysis")
-
-            for i, result in enumerate(fact_check_results["results"], 1):
-                with st.expander(f"Claim {i}: {result['claim'][:100]}..."):
-                    st.write(f"**Credibility Score:** {result['credibility_score']:.3f}")
-                    st.write("**AI Analysis:**")
-                    st.write(result['response'])
+        # Cleaned text if requested
+        if show_cleaned_text:
+            st.subheader("🧹 Cleaned Text")
+            st.text_area("Processed text used for analysis:", cleaned, height=100)
 
         # Recommendations
-        st.subheader("Recommendations")
+        st.subheader("💡 Recommendations")
+        recommendation = get_recommendation(prediction, confidence)
+        
         if confidence > 0.8:
             if prediction == "Real":
-                st.info("High confidence in authenticity. Content appears credible.")
+                st.info(recommendation)
             else:
-                st.warning("High confidence this is fake news. Exercise caution.")
+                st.warning(recommendation)
         elif confidence > 0.6:
-            st.info("🔍 Moderate confidence. Consider additional verification.")
+            st.info(recommendation)
         else:
-            st.warning("Low confidence. Manual fact-checking recommended.")
+            st.warning(recommendation)
+
+        # Additional context
+        st.subheader("📋 Additional Context")
+        st.write("**Text Length:** {} characters".format(len(content)))
+        st.write("**Cleaned Text Length:** {} characters".format(len(cleaned)))
+        st.write("**Model:** {}".format(MODEL_NAME))
+        st.write("**Analysis Time:** {}".format(datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
 
         # Export results
         if st.button("📥 Export Analysis"):
             results_data = {
                 "content": content[:200] + "..." if len(content) > 200 else content,
                 "timestamp": datetime.now().isoformat(),
-                "combined_results": combined_results,
-                "bert_scores": {"real": bert_real, "fake": bert_fake},
-                "fact_check_available": fact_check_results["available"],
-                "claims_analyzed": len(fact_check_results["results"]) if fact_check_results["available"] else 0
+                "prediction": prediction,
+                "confidence": confidence,
+                "confidence_category": confidence_category,
+                "real_probability": real_prob,
+                "fake_probability": fake_prob,
+                "text_length": len(content),
+                "cleaned_text_length": len(cleaned),
+                "model_name": MODEL_NAME,
+                "recommendation": recommendation
             }
 
             st.download_button(
@@ -361,6 +204,28 @@ if st.button("Analyze News", type="primary"):
                 mime="application/json"
             )
 
+# Information section
+st.markdown("---")
+st.subheader("ℹ️ About This Tool")
+st.markdown("""
+This fake news detection system uses a fine-tuned BERT (Bidirectional Encoder Representations from Transformers) model 
+to classify news articles as real or fake. The model has been trained on a large dataset of news articles and can 
+identify patterns that distinguish authentic journalism from misinformation.
+
+**How it works:**
+1. **Text Preprocessing:** The input text is cleaned and normalized
+2. **BERT Analysis:** The pre-trained model analyzes the text patterns
+3. **Classification:** The model outputs probabilities for real vs fake news
+4. **Confidence Assessment:** The system provides confidence levels for the prediction
+
+**Limitations:**
+- The model's performance depends on the quality of its training data
+- It may not perform well on very recent events or emerging topics
+- Always verify important information through multiple credible sources
+- This tool should be used as a starting point for fact-checking, not as definitive proof
+""")
+
 # Footer
 st.markdown("---")
-st.markdown("**Note:** This system combines machine learning with AI fact-checking for improved accuracy. Always verify important information through multiple sources.")
+st.markdown("**Note:** This system uses machine learning for news verification. Always verify important information through multiple credible sources.")
+st.markdown("**Model:** jy46604790/Fake-News-Bert-Detect from Hugging Face")
