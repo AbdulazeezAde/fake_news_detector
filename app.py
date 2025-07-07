@@ -57,7 +57,8 @@ def detect_probs(text):
     p_det_fake = 1 - p_det_real
     return p_det_real, p_det_fake
 
-def genai_probs(query):
+def genai_probs(query, api_key):
+    genai.configure(api_key=api_key)
     resp = genai.models.generate_content(
         model='gemini-1.5-flash',
         contents=f"Is this claim real or fake? \"{query}\"",
