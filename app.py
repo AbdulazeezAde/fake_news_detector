@@ -25,7 +25,7 @@ st.set_page_config(
 
 # Get API key from sidebar
 GEMINI_API_KEY = st.sidebar.text_input("🔑 Enter your Gemini API Key", type="password")
-
+GEMINI_API_KEY = "AIzaSyB0D21uj-P2PtMQa__UMG2UD4tbi4agngI"
 # Configuration
 MODEL_NAME = "jy46604790/Fake-News-Bert-Detect"
 os.getenv('GEMINI_API_KEY')
