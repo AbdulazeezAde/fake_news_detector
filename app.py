@@ -227,7 +227,6 @@ st.markdown("This application combines BERT classification with AI-powered fact-
 # Load models
 try:
     model, tokenizer, clf = load_models()
-    st.success("✅ BERT model loaded successfully")
 except Exception as e:
     st.error(f"❌ Error loading BERT model: {str(e)}")
     st.stop()
@@ -235,7 +234,7 @@ except Exception as e:
 # Initialize Gemini client
 gemini_client, gemini_config = init_gemini_client()
 if gemini_client:
-    st.success("✅ Gemini AI fact-checker enabled")
+    st.success("Gemini AI fact-checker enabled")
 else:
     st.warning("⚠️ Gemini AI not configured - add API key for enhanced fact-checking")
 
@@ -258,7 +257,7 @@ with st.expander("Advanced Options"):
     
     enable_detailed_analysis = st.checkbox("Enable detailed claim analysis", value=True)
 
-if st.button("🔍 Analyze News", type="primary"):
+if st.button("Analyze News", type="primary"):
     if not content or not content.strip():
         st.warning("Please provide valid content to analyze.")
     else:
@@ -317,7 +316,7 @@ if st.button("🔍 Analyze News", type="primary"):
         
         # Detailed claim analysis
         if enable_detailed_analysis and fact_check_results["available"]:
-            st.subheader("📋 Detailed Claim Analysis")
+            st.subheader("Detailed Claim Analysis")
             
             for i, result in enumerate(fact_check_results["results"], 1):
                 with st.expander(f"Claim {i}: {result['claim'][:100]}..."):
@@ -326,16 +325,16 @@ if st.button("🔍 Analyze News", type="primary"):
                     st.write(result['response'])
         
         # Recommendations
-        st.subheader("💡 Recommendations")
+        st.subheader("Recommendations")
         if confidence > 0.8:
             if prediction == "Real":
-                st.info("✅ High confidence in authenticity. Content appears credible.")
+                st.info("High confidence in authenticity. Content appears credible.")
             else:
-                st.warning("⚠️ High confidence this is fake news. Exercise caution.")
+                st.warning("High confidence this is fake news. Exercise caution.")
         elif confidence > 0.6:
             st.info("🔍 Moderate confidence. Consider additional verification.")
         else:
-            st.warning("❓ Low confidence. Manual fact-checking recommended.")
+            st.warning("Low confidence. Manual fact-checking recommended.")
         
         # Export results
         if st.button("📥 Export Analysis"):
