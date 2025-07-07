@@ -29,7 +29,7 @@ bert_clf = pipeline(
 )
 
 # GenAI client
-genai = genai.Client()
+genai = genai.Client(api_key= "AIzaSyB0D21uj-P2PtMQa__UMG2UD4tbi4agngI"))
 retrieval_tool = types.Tool(
     google_search_retrieval=types.GoogleSearchRetrieval(
         dynamic_retrieval_config=types.DynamicRetrievalConfig(
