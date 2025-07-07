@@ -2,6 +2,7 @@ import streamlit as st
 import joblib, re
 from pathlib import Path
 from transformers import AutoModelForSequenceClassification, AutoTokenizer, pipeline
+from google import genai
 from google.genai import types
 
 
