@@ -23,12 +23,8 @@ st.set_page_config(
     layout="centered"
 )
 
-# Get API key from sidebar
-GEMINI_API_KEY = st.sidebar.text_input("🔑 Enter your Gemini API Key", type="password")
-
 # Configuration
 MODEL_NAME = "jy46604790/Fake-News-Bert-Detect"
-os.getenv('GEMINI_API_KEY')
 
 # Initialize models
 @st.cache_resource
@@ -39,16 +35,19 @@ def load_models():
     clf = pipeline("text-classification", model=model, tokenizer=tokenizer)
     return model, tokenizer, clf
 
-@st.cache_resource
-def init_gemini_client():
-    """Initialize Gemini client"""
-    if not GEMINI_API_KEY:
-        return None
+def init_gemini_client(api_key: str):
+    """Initialize Gemini client with API key"""
+    if not api_key:
+        return None, None
 
-    client = genai.Client(api_key=GEMINI_API_KEY)
-    grounding_tool = types.Tool(google_search=types.GoogleSearch())
-    config = types.GenerateContentConfig(tools=[grounding_tool])
-    return client, config
+    try:
+        client = genai.Client(api_key=api_key)
+        grounding_tool = types.Tool(google_search=types.GoogleSearch())
+        config = types.GenerateContentConfig(tools=[grounding_tool])
+        return client, config
+    except Exception as e:
+        st.error(f"Error initializing Gemini client: {str(e)}")
+        return None, None
 
 # Text processing functions
 @st.cache_data
@@ -231,6 +230,13 @@ st.title("📰 Enhanced Fake News Detector")
 st.markdown("### AI-Powered News Verification Tool with Fact-Checking")
 st.markdown("This application combines BERT classification with AI-powered fact-checking for improved accuracy.")
 
+# Get API key from sidebar
+GEMINI_API_KEY = st.sidebar.text_input("🔑 Enter your Gemini API Key", type="password")
+
+# Also check for API key in environment variable
+if not GEMINI_API_KEY:
+    GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
+
 # Load models
 try:
     model, tokenizer, clf = load_models()
@@ -239,9 +245,9 @@ except Exception as e:
     st.stop()
 
 # Initialize Gemini client
-gemini_client, gemini_config = init_gemini_client()
+gemini_client, gemini_config = init_gemini_client(GEMINI_API_KEY)
 if gemini_client:
-    st.success("Gemini AI fact-checker enabled")
+    st.success("✅ Gemini AI fact-checker enabled")
 else:
     st.warning("⚠️ Gemini AI not configured - add API key for enhanced fact-checking")
 
@@ -323,7 +329,7 @@ if st.button("Analyze News", type="primary"):
 
         # Detailed claim analysis
         if enable_detailed_analysis and fact_check_results["available"]:
-            st.subheader("Detailed Claim Analysis")
+            st.subheader("📋 Detailed Claim Analysis")
 
             for i, result in enumerate(fact_check_results["results"], 1):
                 with st.expander(f"Claim {i}: {result['claim'][:100]}..."):
@@ -332,16 +338,16 @@ if st.button("Analyze News", type="primary"):
                     st.write(result['response'])
 
         # Recommendations
-        st.subheader("Recommendations")
+        st.subheader("💡 Recommendations")
         if confidence > 0.8:
             if prediction == "Real":
-                st.info("High confidence in authenticity. Content appears credible.")
+                st.info("✅ High confidence in authenticity. Content appears credible.")
             else:
-                st.warning("High confidence this is fake news. Exercise caution.")
+                st.warning("⚠️ High confidence this is fake news. Exercise caution.")
         elif confidence > 0.6:
             st.info("🔍 Moderate confidence. Consider additional verification.")
         else:
-            st.warning("Low confidence. Manual fact-checking recommended.")
+            st.warning("❓ Low confidence. Manual fact-checking recommended.")
 
         # Export results
         if st.button("📥 Export Analysis"):
@@ -364,3 +370,4 @@ if st.button("Analyze News", type="primary"):
 # Footer
 st.markdown("---")
 st.markdown("**Note:** This system combines machine learning with AI fact-checking for improved accuracy. Always verify important information through multiple sources.")
+st.markdown("**Privacy:** Your API key is not stored and is only used for the current session.")
