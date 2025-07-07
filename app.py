@@ -2,7 +2,9 @@ import streamlit as st
 import joblib, re
 from pathlib import Path
 from transformers import AutoModelForSequenceClassification, AutoTokenizer, pipeline
-from google.genai import types, Client
+from google.generativeai import types, Client
+
+
 
 st.set_page_config(
     page_title="Fake News Detection System",
