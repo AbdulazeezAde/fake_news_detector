@@ -93,7 +93,7 @@ def extract_key_claims(text: str) -> list:
     # Enhanced claim patterns with more comprehensive coverage
     claim_patterns = [
         # Authority and attribution patterns
-        r'\b(said|stated|announced|reported|confirmed|revealed|declared|claimed|alleged|admitted|disclosed)\b',
+        r'\b(said|stated|announced|reported|confirmed|revealed|declared|claimed|alleged|admitted|disclosed|condemned)\b',
         r'\b(according to|sources|officials|study|research|investigation|report|analysis|survey)\b',
         r'\b(expert|scientist|researcher|analyst|spokesperson|representative|witness|president|governor|minister)\b',
         
